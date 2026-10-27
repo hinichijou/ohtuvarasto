@@ -1,5 +1,6 @@
 from varasto import Varasto
 
+# Tehtävä 11: Tee nyt jokin muutos koneellasi repositorioon johonkin muuhun tiedostoon kuin README.md ja yritä pushata koodi GitHubiin.
 
 def main():
     mehua = Varasto(100.0)
