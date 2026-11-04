@@ -1,59 +1,15 @@
-from dataclasses import dataclass
-
 from flask import (
     Flask,
     current_app,
+    flash,
+    get_flashed_messages,
     redirect,
-    render_template_string,
+    render_template,
     request,
     url_for,
 )
 
 from varasto import Varasto
-
-
-@dataclass
-class Warehouse:
-    warehouse_id: int
-    name: str
-    storage: Varasto
-
-
-_TEMPLATE = """
-<!doctype html>
-<title>Warehouses</title>
-<h1>Warehouses</h1>
-
-<form action="{{ url_for('create_warehouse') }}" method="post">
-  <label for="name">Name</label>
-  <input id="name" name="name" type="text">
-  <label for="capacity">Capacity</label>
-  <input id="capacity" name="capacity" type="text">
-  <button type="submit">Create</button>
-</form>
-
-{% if warehouses %}
-<ul>
-{% for warehouse in warehouses %}
-  <li>
-    {{ warehouse.name }} | used: {{ format_number(warehouse.storage.saldo) }} | capacity: {{ format_number(warehouse.storage.tilavuus) }}
-    <form action="{{ url_for('add_to_warehouse', warehouse_id=warehouse.warehouse_id) }}" method="post">
-      <input name="amount" type="text">
-      <button type="submit">Add</button>
-    </form>
-    {% if warehouse.storage.saldo > 0 %}
-    <form action="{{ url_for('remove_from_warehouse', warehouse_id=warehouse.warehouse_id) }}" method="post">
-      <input name="amount" type="text">
-      <button type="submit">Remove</button>
-    </form>
-    {% endif %}
-  </li>
-{% endfor %}
-</ul>
-{% else %}
-<p>No warehouses available</p>
-{% endif %}
-"""
 
 
 def _parse_non_negative_float(value):
@@ -66,16 +22,32 @@ def _parse_non_negative_float(value):
     return parsed_value
 
 
-def _parse_warehouse_name(name):
+def _validate_warehouse_name(name):
     cleaned_name = name.strip()
     if not cleaned_name:
-        return None
+        return None, "Warehouse name is required and cannot be only whitespace."
     if len(cleaned_name) > 50:
-        return None
+        return None, "Warehouse name can be at most 50 characters long."
     if not all(character.isalnum() or character.isspace()
                for character in cleaned_name):
-        return None
-    return cleaned_name
+        return None, (
+            "Warehouse name can only contain letters, numbers and spaces."
+        )
+    return cleaned_name, None
+
+
+def _validate_capacity(value):
+    capacity = _parse_non_negative_float(value)
+    if capacity is None:
+        return None, "Capacity must be a non-negative number."
+    return capacity, None
+
+
+def _validate_amount(value):
+    amount = _parse_non_negative_float(value)
+    if amount is None:
+        return None, "Amount must be a non-negative number."
+    return amount, None
 
 
 def _format_number(value):
@@ -84,37 +56,65 @@ def _format_number(value):
     return str(value)
 
 
-def _find_warehouse(warehouses, warehouse_id):
+def _find_warehouse(warehouses, id):  # pylint: disable=redefined-builtin
     for warehouse in warehouses:
-        if warehouse.warehouse_id == warehouse_id:
+        if warehouse.id == id:
             return warehouse
     return None
 
 
+def _redirect_with_message(message):
+    flash(message)
+    return redirect(url_for("index"))
+
+
+def _validate_create_request(warehouses):
+    name, name_error = _validate_warehouse_name(request.form.get("name", ""))
+    if name_error is not None:
+        return None, None, name_error
+
+    capacity, capacity_error = _validate_capacity(
+        request.form.get("capacity", "")
+    )
+    if capacity_error is not None:
+        return None, None, capacity_error
+
+    if any(warehouse.nimi == name for warehouse in warehouses):
+        return None, None, "Warehouse name must be unique."
+
+    return name, capacity, None
+
+
+def _adjust_warehouse_balance(warehouse, amount, operation):
+    if operation == "add":
+        warehouse.lisaa_varastoon(amount)
+        return None
+    if operation == "remove":
+        warehouse.ota_varastosta(amount)
+        return None
+    return "Invalid operation selected."
+
+
 def index():
-    return render_template_string(
-        _TEMPLATE,
+    return render_template(
+        "index.html",
         warehouses=current_app.config["WAREHOUSES"],
         format_number=_format_number,
+        messages=get_flashed_messages(),
     )
 
 
 def create_warehouse():
     warehouses = current_app.config["WAREHOUSES"]
-    name = _parse_warehouse_name(request.form.get("name", ""))
-    capacity = _parse_non_negative_float(request.form.get("capacity", ""))
-
-    if name is None or capacity is None:
-        return redirect(url_for("index"))
-
-    if any(warehouse.name == name for warehouse in warehouses):
-        return redirect(url_for("index"))
+    name, capacity, validation_error = _validate_create_request(warehouses)
+    if validation_error is not None:
+        return _redirect_with_message(validation_error)
 
     warehouses.append(
-        Warehouse(
-            warehouse_id=current_app.config["NEXT_ID"],
-            name=name,
-            storage=Varasto(capacity),
+        Varasto(
+            capacity,
+            id=current_app.config["NEXT_ID"],
+            nimi=name,
         )
     )
     current_app.config["NEXT_ID"] += 1
@@ -122,22 +122,20 @@ def create_warehouse():
     return redirect(url_for("index"))
 
 
-def add_to_warehouse(warehouse_id):
-    warehouse = _find_warehouse(current_app.config["WAREHOUSES"], warehouse_id)
-    amount = _parse_non_negative_float(request.form.get("amount", ""))
+def adjust_warehouse(id):  # pylint: disable=redefined-builtin
+    warehouse = _find_warehouse(current_app.config["WAREHOUSES"], id)
+    if warehouse is None:
+        return _redirect_with_message("Warehouse not found.")
 
-    if warehouse is not None and amount is not None:
-        warehouse.storage.lisaa_varastoon(amount)
+    amount, amount_error = _validate_amount(request.form.get("amount", ""))
+    if amount_error is not None:
+        return _redirect_with_message(amount_error)
 
-    return redirect(url_for("index"))
-
-
-def remove_from_warehouse(warehouse_id):
-    warehouse = _find_warehouse(current_app.config["WAREHOUSES"], warehouse_id)
-    amount = _parse_non_negative_float(request.form.get("amount", ""))
-
-    if warehouse is not None and amount is not None:
-        warehouse.storage.ota_varastosta(amount)
+    error = _adjust_warehouse_balance(
+        warehouse, amount, request.form.get("operation")
+    )
+    if error is not None:
+        return _redirect_with_message(error)
 
     return redirect(url_for("index"))
 
@@ -146,19 +144,18 @@ def create_app():
     flask_app = Flask(__name__)
     flask_app.config["WAREHOUSES"] = []
     flask_app.config["NEXT_ID"] = 0
+    flask_app.secret_key = "dev"
     flask_app.add_url_rule("/", "index", index, methods=["GET"])
-    flask_app.add_url_rule("/warehouses", "create_warehouse", create_warehouse,
-                           methods=["POST"])
     flask_app.add_url_rule(
-        "/warehouses/<int:warehouse_id>/add",
-        "add_to_warehouse",
-        add_to_warehouse,
+        "/warehouses",
+        "create_warehouse",
+        create_warehouse,
         methods=["POST"],
     )
     flask_app.add_url_rule(
-        "/warehouses/<int:warehouse_id>/remove",
-        "remove_from_warehouse",
-        remove_from_warehouse,
+        "/warehouses/<int:id>/adjust",
+        "adjust_warehouse",
+        adjust_warehouse,
         methods=["POST"],
     )
     return flask_app
