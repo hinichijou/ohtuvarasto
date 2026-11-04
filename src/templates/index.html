@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Warehouse application</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      background: #ffffff;
+    }
+
+    .section {
+      background: #f4f4f4;
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      max-width: 700px;
+    }
+
+    .input-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    input,
+    button {
+      padding: 0.45rem;
+    }
+
+    .messages {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 1rem;
+      color: #a61b1b;
+    }
+
+    .cards {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      max-height: 50vh;
+      overflow-y: auto;
+      max-width: 700px;
+      padding-right: 0.25rem;
+    }
+
+    .card {
+      background: #f4f4f4;
+      border-radius: 12px;
+      padding: 0.9rem;
+    }
+
+    .warehouse-actions {
+      margin-top: 0.5rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Warehouse application</h1>
+
+  {% if messages %}
+    <ul class="messages">
+      {% for message in messages %}
+        <li>{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <section class="section">
+    <h2>Create a warehouse</h2>
+    <form action="{{ url_for('create_warehouse') }}" method="post">
+      <div class="input-row">
+        <label for="name">Name</label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          required
+          maxlength="50"
+          pattern="[A-Za-z0-9 ]+"
+          placeholder="Only letters, numbers and spaces"
+        >
+
+        <label for="capacity">Capacity</label>
+        <input
+          id="capacity"
+          name="capacity"
+          type="number"
+          min="0"
+          step="any"
+          required
+          placeholder="e.g. 10.5"
+        >
+
+        <button type="submit">Create</button>
+      </div>
+    </form>
+  </section>
+
+  <h2>Warehouses</h2>
+  {% if warehouses %}
+    <div class="cards">
+      {% for warehouse in warehouses %}
+        <article class="card">
+          <strong>{{ warehouse.nimi }}</strong><br>
+          used: {{ format_number(warehouse.saldo) }} | capacity: {{ format_number(warehouse.tilavuus) }}
+
+          <form
+            class="warehouse-actions"
+            action="{{ url_for('adjust_warehouse', id=warehouse.id) }}"
+            method="post"
+          >
+            <label for="amount-{{ warehouse.id }}">Amount</label>
+            <input
+              id="amount-{{ warehouse.id }}"
+              name="amount"
+              type="number"
+              min="0"
+              step="any"
+              required
+              placeholder="e.g. 2.5"
+            >
+            <button type="submit" name="operation" value="add">Add</button>
+            <button
+              type="submit"
+              name="operation"
+              value="remove"
+              {% if warehouse.saldo == 0 %}disabled{% endif %}
+            >
+              Remove
+            </button>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No warehouses available</p>
+  {% endif %}
+</body>
+</html>

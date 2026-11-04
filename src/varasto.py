@@ -1,5 +1,9 @@
 class Varasto:
-    def __init__(self, tilavuus, alku_saldo = 0):
+    def __init__(  # pylint: disable=redefined-builtin
+        self, tilavuus, alku_saldo=0, id=None, nimi=""
+    ):
+        self.id = id
+        self.nimi = nimi
         self.tilavuus = max(0.0, tilavuus)
 
         if alku_saldo < 0.0:
